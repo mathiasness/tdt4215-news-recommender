@@ -2,13 +2,18 @@
 EDA focused on behaviours.tsv (MIND-small train split).
 """
 
-from mind_reader import read_behaviors_train
+from pathlib import Path
 import pandas as pd
 
+BASE_PATH = Path(__file__).resolve().parents[2] / "data" / "raw"
 
 # -----------------------------
 # Helpers
 # -----------------------------
+
+def read_behaviors_train():
+    path = BASE_PATH / "MINDsmall_train" / "behaviors.tsv"
+    return pd.read_csv(path, sep="\t")
 
 def set_columns(df):
     """
@@ -31,7 +36,7 @@ def expand_impressions(df):
             news_id, label = token.rsplit("-", 1)
             try:
                 label = int(label)
-            except:
+            except: 
                 continue
             rows.append((imp_id, user, news_id, label))
 
@@ -110,6 +115,14 @@ def click_analysis(df):
     print("\nAverage clicks per impression:", clicks_per_impression.mean())
     print("Distribution of clicks per impression:")
     print(clicks_per_impression.describe())
+    print("Average candidates per impression:",
+      interactions.groupby("impression_id").size().mean())
+
+    print("\nClicks per impression distribution:")
+    print(clicks_per_impression.value_counts().sort_index())
+
+    print("\nCTR:")
+    print(interactions["label"].mean())
 
 
 # ============================================================
