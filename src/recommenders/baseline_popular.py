@@ -2,10 +2,7 @@
 
 
 import numpy as np
-
 import pandas as pd
-
-from src.preprocess.mind_reader import load_processed_split
 from src.recommenders.base import BaseRecommender
 
 # TODO: Check the preprocessing to see that behaviors["impressions"] is in the expected format (list of "nid-label" strings).
