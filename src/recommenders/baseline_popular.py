@@ -2,8 +2,10 @@
 
 
 import numpy as np
+
 import pandas as pd
 
+from src.preprocess.mind_reader import load_processed_split
 from src.recommenders.base import BaseRecommender
 
 # TODO: Check the preprocessing to see that behaviors["impressions"] is in the expected format (list of "nid-label" strings).
@@ -28,12 +30,8 @@ class PopularRecommender(BaseRecommender):
             PopularRecommender: The fitted recommender instance.
         """
 
-        clicks = []
-        for imps in behaviors["impressions"]:
-            for imp in imps.split():
-                nid, label = imp.split("-")
-                if label == "1":
-                    clicks.append(nid)
+        df = behaviors[["candidates", "labels"]].explode(["candidates", "labels"])
+        clicks = df[df["labels"].astype(int) == 1]["candidates"]
 
         pop = pd.Series(clicks).value_counts()
 
@@ -71,6 +69,3 @@ class PopularRecommender(BaseRecommender):
         scores = self.score(user_id, candidates)
         idx = np.argsort(scores)[::-1][:k]
         return [candidates[i] for i in idx]
-    
-
-    
