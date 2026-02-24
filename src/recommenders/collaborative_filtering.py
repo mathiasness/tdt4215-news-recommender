@@ -38,7 +38,9 @@ class ItemKNNRecommender(BaseRecommender):
         return clicked
 
     @staticmethod
-    def _parse_history(history: str) -> list[str]:
+    def _parse_history(history) -> list[str]:
+        if isinstance(history, list):
+            return [str(x) for x in history if str(x).strip()]
         if not isinstance(history, str) or not history.strip():
             return []
         return history.split()
