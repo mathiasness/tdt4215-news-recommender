@@ -1,4 +1,4 @@
-"""Collaborative filtering recommenders."""
+"""Item-based collaborative filtering recommender."""
 
 from collections import Counter, defaultdict
 from itertools import combinations
@@ -12,8 +12,8 @@ from src.recommenders.base import BaseRecommender
 class ItemKNNRecommender(BaseRecommender):
     """
     Item-based kNN recommender for implicit feedback.
-    Builds item-item similarity from user click histories and
-    scores candidates by summing similarities to a user's clicked items.
+    Builds item-item similarity from user click histories and scores candidates by
+    summing similarities to a user's clicked items.
     """
 
     def __init__(self, k_neighbors: int = 50, top_k_popular: int | None = None):
@@ -46,10 +46,6 @@ class ItemKNNRecommender(BaseRecommender):
         return history.split()
 
     def fit(self, behaviors: pd.DataFrame) -> "ItemKNNRecommender":
-        """
-        Fit item-item similarities using user click histories.
-        Expected columns: `user_id` and either `history` or `impressions`.
-        """
         if "user_id" not in behaviors.columns:
             raise ValueError("behaviors must contain a `user_id` column.")
 
@@ -58,11 +54,8 @@ class ItemKNNRecommender(BaseRecommender):
 
         has_history = "history" in behaviors.columns
         has_impressions = "impressions" in behaviors.columns
-
         if not has_history and not has_impressions:
-            raise ValueError(
-                "behaviors must contain either `history` or `impressions`."
-            )
+            raise ValueError("behaviors must contain either `history` or `impressions`.")
 
         for row in behaviors.itertuples(index=False):
             user_id = str(getattr(row, "user_id"))
@@ -109,10 +102,6 @@ class ItemKNNRecommender(BaseRecommender):
         return self
 
     def score(self, user_id: str, candidates: list[str]) -> np.ndarray:
-        """
-        Score candidates for one user.
-        If user has no history, falls back to global popularity.
-        """
         if self.popularity is None:
             raise RuntimeError("Model must be fit() before calling score().")
 
@@ -136,7 +125,6 @@ class ItemKNNRecommender(BaseRecommender):
         return np.array(scores, dtype=np.float32)
 
     def recommend(self, user_id: str, candidates: list[str], k: int = 10) -> list[str]:
-        """Recommend top-k candidates for one user."""
         if k <= 0:
             return []
         scores = self.score(user_id, candidates)

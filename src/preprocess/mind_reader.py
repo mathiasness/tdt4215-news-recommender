@@ -56,6 +56,25 @@ def _parse_impressions(value: Any) -> Tuple[List[str], List[int]]:
     return (candidates, labels)
 
 
+def _parse_entities(value: Any) -> List[str]:
+    """Parse MIND entity JSON into a list of Wikidata IDs."""
+    if not isinstance(value, str) or not value.strip():
+        return []
+    try:
+        entities = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+
+    out: List[str] = []
+    for entity in entities:
+        if not isinstance(entity, dict):
+            continue
+        wikidata_id = entity.get("WikidataId")
+        if isinstance(wikidata_id, str) and wikidata_id:
+            out.append(wikidata_id)
+    return out
+
+
 def _serialize_list_columns(df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
     """Serialize list columns to JSON strings for CSV storage."""
     out = df.copy()
@@ -91,6 +110,57 @@ def parse_behaviors(behaviors_path: Path):
 
     behaviors_df = df[CANONICAL_BEHAVIORS_COLUMNS].copy()
     return behaviors_df
+
+
+def load_entity_embeddings(
+    splits: Tuple[str, ...] = ("train", "test"),
+    data_dir: str | Path = DEFAULT_DATA_DIR,
+) -> dict[str, list[float]]:
+    """Load entity embeddings from one or more MIND split folders."""
+    vectors: dict[str, list[float]] = {}
+
+    for split in splits:
+        split_dir = get_split_dir(split, data_dir)
+        emb_path = split_dir / "entity_embedding.vec"
+        if not emb_path.exists():
+            continue
+
+        with emb_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                parts = line.strip().split("\t")
+                if len(parts) < 2:
+                    continue
+                entity_id = parts[0]
+                if entity_id in vectors:
+                    continue
+                vectors[entity_id] = [float(x) for x in parts[1:]]
+
+    return vectors
+
+
+def load_news_entity_ids(
+    splits: Tuple[str, ...] = ("train", "test"),
+    data_dir: str | Path = DEFAULT_DATA_DIR,
+) -> dict[str, list[str]]:
+    """Load per-news Wikidata entity IDs from raw MIND news files."""
+    mapping: dict[str, list[str]] = {}
+
+    for split in splits:
+        split_dir = get_split_dir(split, data_dir)
+        news_path = split_dir / "news.tsv"
+        if not news_path.exists():
+            continue
+
+        df = pd.read_csv(news_path, sep="\t", header=None, names=NEWS_COLUMNS, dtype=str).fillna("")
+        df = df[["news_id", "title_entities", "abstract_entities"]]
+
+        for row in df.itertuples(index=False):
+            title_ids = _parse_entities(row.title_entities)
+            abstract_ids = _parse_entities(row.abstract_entities)
+            merged = list(dict.fromkeys(title_ids + abstract_ids))
+            mapping[str(row.news_id)] = merged
+
+    return mapping
 
 
 ### splitting and caching ###

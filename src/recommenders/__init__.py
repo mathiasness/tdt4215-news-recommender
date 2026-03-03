@@ -1,4 +1,13 @@
-from src.recommenders.baseline_popular import PopularRecommender
-from src.recommenders.collaborative_filtering import ItemKNNRecommender
+from src.recommenders.baseline.popular import PopularRecommender
+from src.recommenders.baseline.random import RandomRecommender
+from src.recommenders.collaborative.item_knn import ItemKNNRecommender
+from src.recommenders.content.entity import EntityContentRecommender
+from src.recommenders.content.tfidf import TfidfContentRecommender
 
-__all__ = ["PopularRecommender", "ItemKNNRecommender"]
+__all__ = [
+    "PopularRecommender",
+    "RandomRecommender",
+    "ItemKNNRecommender",
+    "TfidfContentRecommender",
+    "EntityContentRecommender",
+]
