@@ -19,13 +19,13 @@ from src.preprocess.mind_reader import build_processed_split, load_processed_spl
 
 MODEL_REGISTRY: dict[str, dict[str, Any]] = {
     "popular": {
-        "class_path": "src.recommenders.baseline_popular:PopularRecommender",
+        "class_path": "src.recommenders.baseline.popular:PopularRecommender",
         "fit_mode": "behaviors",
         "cli_args": [],
         "init_from_args": {},
     },
     "random": {
-        "class_path": "src.recommenders.baseline_random:RandomRecommender",
+        "class_path": "src.recommenders.baseline.random:RandomRecommender",
         "fit_mode": "behaviors",
         "cli_args": [
             {"flags": ("--seed",), "kwargs": {"type": int, "default": 42}},
@@ -33,7 +33,7 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "init_from_args": {"seed": "seed"},
     },
     "itemknn": {
-        "class_path": "src.recommenders.collaborative_filtering:ItemKNNRecommender",
+        "class_path": "src.recommenders.collaborative.item_knn:ItemKNNRecommender",
         "fit_mode": "behaviors",
         "cli_args": [
             {"flags": ("--k-neighbors",), "kwargs": {"type": int, "default": 50}},
@@ -44,8 +44,8 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             "top_k_popular": "top_k_popular",
         },
     },
-    "content": {
-        "class_path": "src.recommenders.content_based:ContentBasedRecommender",
+    "content_tfidf": {
+        "class_path": "src.recommenders.content.tfidf:TfidfContentRecommender",
         "fit_mode": "legacy_content",
         "cli_args": [
             {"flags": ("--max-features",), "kwargs": {"type": int, "default": 50000}},
@@ -53,6 +53,12 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         ],
         "init_from_args": {"max_features": "max_features"},
         "init_builder": lambda args: {"ngram_range": (1, args.ngram_max)},
+    },
+    "content_entity": {
+        "class_path": "src.recommenders.content.entity:EntityContentRecommender",
+        "fit_mode": "legacy_content",
+        "cli_args": [],
+        "init_from_args": {},
     },
 }
 

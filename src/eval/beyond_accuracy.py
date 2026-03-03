@@ -1,5 +1,6 @@
 import math
-from typing import Counter, List, Sequence
+from collections import Counter
+from typing import List, Sequence
 
 import pandas as pd
 
