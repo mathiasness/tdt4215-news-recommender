@@ -226,7 +226,7 @@ def _score_tfidf_with_history(
     if not hist_idxs:
         return _popularity_scores(candidates, popularity_prior, history)
 
-    user_profile = model.news_tfidf[hist_idxs].mean(axis=0)
+    user_profile = np.asarray(model.news_tfidf[hist_idxs].mean(axis=0), dtype=np.float32)
 
     scores = np.array(
         [float(popularity_prior.get(str(nid), 0.0)) if popularity_prior is not None else 0.0 for nid in candidates],
