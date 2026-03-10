@@ -1,5 +1,7 @@
 """Run model comparison and generate metric plots."""
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -21,6 +23,9 @@ import src.run as runner
 from src.eval.evaluator import Evaluator
 
 
+PLOT_METRICS = ("ndcg", "mrr", "recall", "coverage", "novelty", "diversity")
+
+
 def _parse_ks(raw: str) -> list[int]:
     ks = []
     for part in raw.split(","):
@@ -32,6 +37,7 @@ def _parse_ks(raw: str) -> list[int]:
     if not unique:
         raise ValueError("--ks must contain at least one positive integer.")
     return unique
+
 
 
 def _plot_metric_by_k(
@@ -67,6 +73,7 @@ def _plot_metric_by_k(
     plt.close(fig)
 
 
+
 def _plot_reference_heatmap(
     df: pd.DataFrame,
     reference_k: int,
@@ -79,12 +86,13 @@ def _plot_reference_heatmap(
         f"recall@{reference_k}",
         f"coverage@{reference_k}",
         f"novelty@{reference_k}",
+        f"diversity@{reference_k}",
     ]
     if not all(col in df.columns for col in columns):
         return
 
     matrix = df[columns].to_numpy(dtype=float)
-    fig, ax = plt.subplots(figsize=(8, max(3, 0.6 * len(df))))
+    fig, ax = plt.subplots(figsize=(9, max(3, 0.6 * len(df))))
     im = ax.imshow(matrix, aspect="auto", cmap="viridis")
     ax.set_yticks(np.arange(len(df)))
     ax.set_yticklabels(df["model"].tolist())
@@ -100,6 +108,7 @@ def _plot_reference_heatmap(
     fig.tight_layout()
     fig.savefig(output_path, dpi=dpi)
     plt.close(fig)
+
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -143,6 +152,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+
 def main() -> None:
     args = build_parser().parse_args()
     ks = _parse_ks(args.ks)
@@ -168,7 +178,7 @@ def main() -> None:
     summary_csv = output_dir / "metrics_summary.csv"
     results.to_csv(summary_csv, index=False)
 
-    for metric in ("ndcg", "mrr", "recall", "coverage", "novelty"):
+    for metric in PLOT_METRICS:
         _plot_metric_by_k(
             df=results,
             metric=metric,

@@ -1,5 +1,7 @@
 """Evaluation pipeline for recommenders."""
 
+from __future__ import annotations
+
 import argparse
 from typing import Iterable
 
@@ -8,8 +10,10 @@ import pandas as pd
 
 import src.run as runner
 from src.eval.beyond_accuracy import (
+    build_news_metadata_lookup,
     click_popularity,
     coverage_at_k,
+    mean_diversity_at_k,
     mean_novelty_at_k,
 )
 from src.eval.metrics import mrr_at_k, ndcg_at_k, recall_at_k
@@ -17,7 +21,7 @@ from src.preprocess.mind_reader import load_processed_split
 
 
 class Evaluator:
-    """Evaluate one or many registered models across multiple ranking metrics."""
+    """Evaluate one or many registered models across accuracy and beyond-accuracy metrics."""
 
     def __init__(
         self,
@@ -56,17 +60,29 @@ class Evaluator:
         news_train, beh_train = load_processed_split("train")
         news_test, beh_test = load_processed_split("test")
 
+        # Keep coverage denominator stable even when only a sample of impressions is evaluated.
+        evaluation_candidate_universe: set[str] = {
+            str(candidate)
+            for candidates in beh_test["candidates"]
+            for candidate in candidates
+        }
+
         if self.sample_impressions is not None and self.sample_impressions > 0:
             sample_n = min(self.sample_impressions, len(beh_test))
             beh_test = beh_test.sample(n=sample_n, random_state=self.random_seed).reset_index(
                 drop=True
             )
 
+        all_news = pd.concat([news_train, news_test], ignore_index=True).drop_duplicates(
+            subset=["news_id"]
+        )
+        news_metadata = build_news_metadata_lookup(all_news)
+        catalog_size = int(all_news["news_id"].nunique())
+
         model = runner._build_model(model_name, args)
         runner._fit_model(model_name, model, beh_train, news_train, news_test)
 
         click_counts, total_clicks = click_popularity(beh_train)
-        candidate_universe: set[str] = set()
         recommendations_by_k = {k: [] for k in self.ks}
         ndcg_by_k = {k: [] for k in self.ks}
         mrr_by_k = {k: [] for k in self.ks}
@@ -79,14 +95,18 @@ class Evaluator:
             if not candidates:
                 continue
 
-            candidate_universe.update(str(c) for c in candidates)
-            scores = runner._score_candidates(model_name, model, str(row.user_id), candidates)
+            scores = np.asarray(
+                runner._score_candidates(model_name, model, str(row.user_id), candidates),
+                dtype=np.float64,
+            ).reshape(-1)
+            scores = np.nan_to_num(scores, nan=-1.0e12, posinf=1.0e12, neginf=-1.0e12)
+
             if len(scores) != len(labels):
                 raise ValueError(
                     f"Model returned {len(scores)} scores for {len(labels)} candidates."
                 )
 
-            order = np.argsort(scores)[::-1]
+            order = np.argsort(-scores, kind="mergesort")
             ranked_candidates = [str(candidates[i]) for i in order]
 
             for k in self.ks:
@@ -108,16 +128,26 @@ class Evaluator:
                 result[f"recall@{k}"] = 0.0
                 result[f"coverage@{k}"] = 0.0
                 result[f"novelty@{k}"] = 0.0
+                result[f"diversity@{k}"] = 0.0
                 continue
 
             result[f"ndcg@{k}"] = float(np.mean(ndcg_by_k[k]))
             result[f"mrr@{k}"] = float(np.mean(mrr_by_k[k]))
             result[f"recall@{k}"] = float(np.mean(recall_by_k[k]))
             result[f"coverage@{k}"] = float(
-                coverage_at_k(recommendations_by_k[k], candidate_universe)
+                coverage_at_k(recommendations_by_k[k], evaluation_candidate_universe)
             )
             result[f"novelty@{k}"] = float(
-                mean_novelty_at_k(recommendations_by_k[k], click_counts, total_clicks, k=k)
+                mean_novelty_at_k(
+                    recommendations_by_k[k],
+                    click_counts,
+                    total_clicks,
+                    k=k,
+                    catalog_size=catalog_size,
+                )
+            )
+            result[f"diversity@{k}"] = float(
+                mean_diversity_at_k(recommendations_by_k[k], news_metadata, k=k)
             )
 
         return result
