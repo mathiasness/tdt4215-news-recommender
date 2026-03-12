@@ -15,9 +15,16 @@ from src.recommenders.base import BaseRecommender
 
 
 class TfidfContentRecommender(BaseRecommender):
-    """Build user profiles from averaged TF-IDF vectors of clicked news."""
+    """Build user profiles from averaged TF-IDF vectors of clicked news.
 
-    CACHE_SCHEMA_VERSION = "tfidf-v1"
+    Minimal fixes applied:
+    - include category/subcategory in the text representation when available
+    - avoid np.matrix profiles from sparse `.mean(axis=0)`
+    - allow temporary history-aware scoring via `score(..., history=...)`
+    - use light recency weighting for history-derived profiles
+    """
+
+    CACHE_SCHEMA_VERSION = "tfidf-v2"
 
     def __init__(
         self,
@@ -42,6 +49,7 @@ class TfidfContentRecommender(BaseRecommender):
         self.news_index: list[str] = []
         self.news_tfidf = None
         self.user_profiles: dict[str, np.ndarray] = {}
+        self.news_id_to_idx: dict[str, int] = {}
 
     def _build_cache_key(self, news: pd.DataFrame, text_col: str) -> str:
         hasher = hashlib.sha256()
@@ -79,6 +87,7 @@ class TfidfContentRecommender(BaseRecommender):
             return False
 
         self.news_index = [str(x) for x in news_index]
+        self.news_id_to_idx = {nid: i for i, nid in enumerate(self.news_index)}
         self.news_tfidf = news_tfidf
         self.vectorizer = vectorizer
         return True
@@ -94,6 +103,34 @@ class TfidfContentRecommender(BaseRecommender):
         with vectorizer_path.open("wb") as f:
             pickle.dump(self.vectorizer, f)
 
+    @staticmethod
+    def _compose_text(news: pd.DataFrame) -> pd.Series:
+        parts = []
+        for col in ("category", "subcategory", "title", "abstract"):
+            if col in news.columns:
+                parts.append(news[col].fillna("").astype(str))
+        if not parts:
+            return pd.Series([""] * len(news), index=news.index, dtype="object")
+        text = parts[0]
+        for part in parts[1:]:
+            text = text + " " + part
+        return text.str.strip()
+
+    def _profile_from_history(self, history: list[str]) -> np.ndarray | None:
+        if self.news_tfidf is None:
+            return None
+        hist_ids = [str(nid) for nid in history if str(nid) in self.news_id_to_idx]
+        if not hist_ids:
+            return None
+
+        idxs = [self.news_id_to_idx[nid] for nid in hist_ids]
+        # light recency weighting: later clicks matter more, without redesigning the model.
+        weights = np.arange(1, len(idxs) + 1, dtype=np.float32)
+        weights = weights / weights.sum()
+
+        profile = self.news_tfidf[idxs].multiply(weights[:, None]).sum(axis=0)
+        return np.asarray(profile, dtype=np.float32)
+
     def fit(
         self,
         news_df: pd.DataFrame,
@@ -101,10 +138,9 @@ class TfidfContentRecommender(BaseRecommender):
         text_col: str = "text",
     ) -> "TfidfContentRecommender":
         news = news_df.copy()
-        news["text"] = news["title"] + " " + news["abstract"]
-        news = news[["news_id", "text"]]
         news["news_id"] = news["news_id"].astype(str)
-        news[text_col] = news[text_col].astype(str)
+        news[text_col] = self._compose_text(news).astype(str)
+        news = news[["news_id", text_col]]
 
         cache_loaded = False
         if self.use_cache:
@@ -112,33 +148,44 @@ class TfidfContentRecommender(BaseRecommender):
             cache_loaded = self._load_from_cache(cache_key)
         if not cache_loaded:
             self.news_index = news["news_id"].tolist()
+            self.news_id_to_idx = {nid: i for i, nid in enumerate(self.news_index)}
             self.news_tfidf = self.vectorizer.fit_transform(news[text_col])
             if self.use_cache:
                 self._save_to_cache(cache_key)
 
-        news_id_to_idx = {nid: i for i, nid in enumerate(self.news_index)}
         self.user_profiles = {}
         for row in user_history_df[["user_id", "history"]].itertuples(index=False):
             user = str(row.user_id)
             clicked = row.history if isinstance(row.history, list) else []
-            idxs = [news_id_to_idx[str(nid)] for nid in clicked if str(nid) in news_id_to_idx]
-            if idxs:
-                self.user_profiles[user] = np.asarray(self.news_tfidf[idxs].mean(axis=0))
+            profile = self._profile_from_history(clicked)
+            if profile is not None:
+                self.user_profiles[user] = profile
 
         return self
 
-    def score(self, user_id: str) -> pd.DataFrame:
-        if user_id not in self.user_profiles:
+    def score(self, user_id: str, history: list[str] | None = None) -> pd.DataFrame:
+        if history is not None:
+            user_profile = self._profile_from_history(history)
+        else:
+            user_profile = self.user_profiles.get(user_id)
+
+        if user_profile is None:
             raise ValueError(f"User {user_id} not found")
-        scores = cosine_similarity(self.user_profiles[user_id], self.news_tfidf).flatten()
+
+        scores = cosine_similarity(user_profile, self.news_tfidf).ravel()
         return pd.DataFrame({"news_id": self.news_index, "score": scores}).sort_values(
             "score", ascending=False
         )
 
     def recommend(
-        self, user_id: str, k: int = 10, seen_news: list[str] | None = None
+        self,
+        user_id: str,
+        k: int = 10,
+        seen_news: list[str] | None = None,
+        history: list[str] | None = None,
     ) -> list[str]:
-        rankings = self.score(user_id)
+        rankings = self.score(user_id, history=history)
         if seen_news is not None:
-            rankings = rankings[~rankings["news_id"].isin(seen_news)]
+            seen_set = {str(nid) for nid in seen_news}
+            rankings = rankings[~rankings["news_id"].isin(seen_set)]
         return rankings.head(k)["news_id"].tolist()
