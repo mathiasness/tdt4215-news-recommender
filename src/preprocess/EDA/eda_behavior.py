@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import math
 from collections import Counter
@@ -12,7 +13,7 @@ import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BASE_PATH = REPO_ROOT / "data" / "raw"
-TRAIN_PATH = BASE_PATH / "MINDsmall_train"
+TRAIN_PATH = BASE_PATH / "MINDlarge_train"
 
 BEHAVIORS_COLUMNS = ["impression_id", "user_id", "time", "history", "impressions"]
 NEWS_COLUMNS = [
@@ -28,10 +29,57 @@ NEWS_COLUMNS = [
 
 
 def _read_tsv(path: Path, columns: list[str]) -> pd.DataFrame:
+    path = path.resolve()
+
+    print(f"Reading: {path}")
+    print(f"Exists: {path.exists()}")
+    print(f"Is file: {path.is_file()}")
+
     if not path.exists():
         raise FileNotFoundError(f"Missing file: {path}")
-    return pd.read_csv(path, sep="\t", header=None, names=columns, dtype=str).fillna("")
+    if not path.is_file():
+        raise FileNotFoundError(f"Not a file: {path}")
 
+    try:
+        df = pd.read_csv(
+            str(path),
+            sep="\t",
+            header=None,
+            names=columns,
+            dtype=str,
+            engine="python",
+            encoding="utf-8",
+            on_bad_lines="warn",
+        )
+        return df.fillna("")
+    except Exception as e:
+        print(f"Failed while reading: {path}")
+        raise e
+
+def _read_tsv(path: Path, columns: list[str], disable_quoting: bool = False) -> pd.DataFrame:
+    path = path.resolve()
+
+    if not path.exists():
+        raise FileNotFoundError(f"Missing file: {path}")
+    if not path.is_file():
+        raise FileNotFoundError(f"Not a file: {path}")
+
+    read_kwargs = {
+        "filepath_or_buffer": str(path),
+        "sep": "\t",
+        "header": None,
+        "names": columns,
+        "dtype": str,
+        "encoding": "utf-8",
+        "engine": "python",
+        "on_bad_lines": "warn",
+    }
+
+    if disable_quoting:
+        read_kwargs["quoting"] = csv.QUOTE_NONE
+
+    df = pd.read_csv(**read_kwargs)
+    return df.fillna("")
 
 def read_behaviors_train() -> pd.DataFrame:
     path = TRAIN_PATH / "behaviors.tsv"
@@ -40,7 +88,7 @@ def read_behaviors_train() -> pd.DataFrame:
 
 def read_news_train() -> pd.DataFrame:
     path = TRAIN_PATH / "news.tsv"
-    return _read_tsv(path, NEWS_COLUMNS)
+    return _read_tsv(path, NEWS_COLUMNS, disable_quoting=True)
 
 
 def set_columns(df: pd.DataFrame) -> pd.DataFrame:
