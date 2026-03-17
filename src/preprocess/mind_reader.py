@@ -92,6 +92,20 @@ def _deserialize_list_columns(df: pd.DataFrame, columns: List[str]) -> pd.DataFr
         )
     return out
 
+
+def filter_behaviors_by_history_length(
+    behaviors_df: pd.DataFrame,
+    min_history_len: int = 0,
+) -> pd.DataFrame:
+    """Keep only impressions whose history length is at least `min_history_len`."""
+    if min_history_len <= 0:
+        return behaviors_df.reset_index(drop=True)
+
+    history_lengths = behaviors_df["history"].apply(
+        lambda value: len(value) if isinstance(value, list) else 0
+    )
+    return behaviors_df.loc[history_lengths >= int(min_history_len)].reset_index(drop=True)
+
 ### Main parsing functions ###
 
 def parse_news(news_path: Path):
@@ -115,12 +129,13 @@ def parse_behaviors(behaviors_path: Path):
 def load_entity_embeddings(
     splits: Tuple[str, ...] = ("train", "test"),
     data_dir: str | Path = DEFAULT_DATA_DIR,
+    split_dirs: dict[str, str] | None = None,
 ) -> dict[str, list[float]]:
     """Load entity embeddings from one or more MIND split folders."""
     vectors: dict[str, list[float]] = {}
 
     for split in splits:
-        split_dir = get_split_dir(split, data_dir)
+        split_dir = get_split_dir(split, data_dir, split_dirs=split_dirs)
         emb_path = split_dir / "entity_embedding.vec"
         if not emb_path.exists():
             continue
@@ -141,12 +156,13 @@ def load_entity_embeddings(
 def load_news_entity_ids(
     splits: Tuple[str, ...] = ("train", "test"),
     data_dir: str | Path = DEFAULT_DATA_DIR,
+    split_dirs: dict[str, str] | None = None,
 ) -> dict[str, list[str]]:
     """Load per-news Wikidata entity IDs from raw MIND news files."""
     mapping: dict[str, list[str]] = {}
 
     for split in splits:
-        split_dir = get_split_dir(split, data_dir)
+        split_dir = get_split_dir(split, data_dir, split_dirs=split_dirs)
         news_path = split_dir / "news.tsv"
         if not news_path.exists():
             continue
@@ -165,29 +181,40 @@ def load_news_entity_ids(
 
 ### splitting and caching ###
 
-def get_split_dir(split: str, data_dir: str | Path = DEFAULT_DATA_DIR) -> Path:
-    if split not in SPLIT_DIRS:
-        raise ValueError(f"Unknown split '{split}'. Expected one of {list(SPLIT_DIRS)}")
-    return Path(data_dir) / SPLIT_DIRS[split]
+def get_split_dir(
+    split: str,
+    data_dir: str | Path = DEFAULT_DATA_DIR,
+    split_dirs: dict[str, str] | None = None,
+) -> Path:
+    mapping = SPLIT_DIRS if split_dirs is None else split_dirs
+    if split not in mapping:
+        raise ValueError(f"Unknown split '{split}'. Expected one of {list(mapping)}")
+    return Path(data_dir) / mapping[split]
 
 
 def build_processed_split(
     split: str,
     data_dir: Path = DEFAULT_DATA_DIR,
     processed_dir: Path = DEFAULT_PROCESSED_DIR,
+    split_dirs: dict[str, str] | None = None,
+    min_history_len: int = 0,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Parse and store a MIND split."""
 
     processed_dir = Path(processed_dir)
     processed_dir.mkdir(parents=True, exist_ok=True)
     
-    split_dir = get_split_dir(split, data_dir)
+    split_dir = get_split_dir(split, data_dir, split_dirs=split_dirs)
     
     news_path = split_dir / "news.tsv"
     behaviors_path = split_dir / "behaviors.tsv"
 
     news_df = parse_news(news_path)
     behaviors_df = parse_behaviors(behaviors_path)
+    behaviors_df = filter_behaviors_by_history_length(
+        behaviors_df,
+        min_history_len=min_history_len,
+    )
 
     news_out = processed_dir / f"{split}_news.csv"
     behaviors_out = processed_dir / f"{split}_behaviors.csv"
@@ -201,6 +228,7 @@ def build_processed_split(
 def load_processed_split(
     split: str,
     processed_dir: str | Path = DEFAULT_PROCESSED_DIR,
+    min_history_len: int = 0,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Load a cached MIND split."""
 
@@ -212,5 +240,9 @@ def load_processed_split(
     behaviors_df = pd.read_csv(behaviors_path, dtype=str).fillna("")
     behaviors_df = _deserialize_list_columns(behaviors_df, ["history", "candidates", "labels"])
     behaviors_df["labels"] = behaviors_df["labels"].apply(lambda xs: [int(x) for x in xs])
-    
+    behaviors_df = filter_behaviors_by_history_length(
+        behaviors_df,
+        min_history_len=min_history_len,
+    )
+
     return news_df[CANONICAL_NEWS_COLUMNS], behaviors_df[CANONICAL_BEHAVIORS_COLUMNS]

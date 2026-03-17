@@ -78,7 +78,6 @@ def _plot_reference_heatmap(
         f"mrr@{reference_k}",
         f"recall@{reference_k}",
         f"coverage@{reference_k}",
-        f"novelty@{reference_k}",
     ]
     if not all(col in df.columns for col in columns):
         return
@@ -104,6 +103,13 @@ def _plot_reference_heatmap(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Compare models and generate metric plots.")
+    runner._add_data_args(parser)
+    parser.add_argument(
+        "--min-history",
+        type=int,
+        default=0,
+        help="Keep only impressions with history length >= this value.",
+    )
     parser.add_argument(
         "--models",
         nargs="*",
@@ -153,7 +159,17 @@ def main() -> None:
             f"Unknown model(s): {unknown}. Available: {sorted(runner.MODEL_REGISTRY.keys())}"
         )
 
-    evaluator = Evaluator(ks=ks, sample_impressions=args.sample_impressions)
+    evaluator = Evaluator(
+        ks=ks,
+        sample_impressions=args.sample_impressions,
+        processed_dir=args.processed_dir,
+        min_history_len=args.min_history,
+        default_model_overrides={
+            "data_dir": args.data_dir,
+            "train_split_dir": args.train_split_dir,
+            "test_split_dir": args.test_split_dir,
+        },
+    )
     results = evaluator.evaluate_many(args.models)
 
     sort_by = args.sort_by
@@ -189,6 +205,11 @@ def main() -> None:
         "models": args.models,
         "ks": ks,
         "sample_impressions": args.sample_impressions,
+        "processed_dir": args.processed_dir,
+        "data_dir": args.data_dir,
+        "train_split_dir": args.train_split_dir,
+        "test_split_dir": args.test_split_dir,
+        "min_history": args.min_history,
         "sort_by": sort_by,
         "num_models": int(len(results)),
     }

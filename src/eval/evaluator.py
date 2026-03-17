@@ -24,6 +24,9 @@ class Evaluator:
         ks: Iterable[int] = (5, 10),
         sample_impressions: int | None = None,
         random_seed: int = 42,
+        processed_dir: str = "data/processed",
+        min_history_len: int = 0,
+        default_model_overrides: dict[str, int | float | str | bool] | None = None,
     ):
         ks = sorted({int(k) for k in ks if int(k) > 0})
         if not ks:
@@ -31,10 +34,14 @@ class Evaluator:
         self.ks = ks
         self.sample_impressions = sample_impressions
         self.random_seed = random_seed
+        self.processed_dir = processed_dir
+        self.min_history_len = int(min_history_len)
+        self.default_model_overrides = {} if default_model_overrides is None else default_model_overrides
 
     @staticmethod
     def _default_model_args(model_name: str) -> argparse.Namespace:
         parser = argparse.ArgumentParser(add_help=False)
+        runner._add_data_args(parser)
         runner._add_model_args(parser)
         args = parser.parse_args([])
         setattr(args, "model", model_name)
@@ -49,12 +56,22 @@ class Evaluator:
             raise ValueError(f"Unknown model '{model_name}'.")
 
         args = self._default_model_args(model_name)
+        for key, value in self.default_model_overrides.items():
+            setattr(args, key, value)
         if overrides:
             for key, value in overrides.items():
                 setattr(args, key, value)
 
-        news_train, beh_train = load_processed_split("train")
-        news_test, beh_test = load_processed_split("test")
+        news_train, beh_train = load_processed_split(
+            "train",
+            processed_dir=self.processed_dir,
+            min_history_len=self.min_history_len,
+        )
+        news_test, beh_test = load_processed_split(
+            "test",
+            processed_dir=self.processed_dir,
+            min_history_len=self.min_history_len,
+        )
 
         if self.sample_impressions is not None and self.sample_impressions > 0:
             sample_n = min(self.sample_impressions, len(beh_test))
@@ -66,6 +83,7 @@ class Evaluator:
         runner._fit_model(model_name, model, beh_train, news_train, news_test)
 
         click_counts, total_clicks = click_popularity(beh_train)
+        popularity_prior = runner._build_popularity_prior(beh_train)
         candidate_universe: set[str] = set()
         recommendations_by_k = {k: [] for k in self.ks}
         ndcg_by_k = {k: [] for k in self.ks}
@@ -80,7 +98,15 @@ class Evaluator:
                 continue
 
             candidate_universe.update(str(c) for c in candidates)
-            scores = runner._score_candidates(model_name, model, str(row.user_id), candidates)
+            history = [str(x) for x in row.history] if isinstance(row.history, list) else None
+            scores = runner._score_candidates(
+                model_name,
+                model,
+                str(row.user_id),
+                candidates,
+                history=history,
+                popularity_prior=popularity_prior,
+            )
             if len(scores) != len(labels):
                 raise ValueError(
                     f"Model returned {len(scores)} scores for {len(labels)} candidates."
