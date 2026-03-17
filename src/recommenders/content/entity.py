@@ -13,7 +13,17 @@ class EntityContentRecommender(BaseRecommender):
     User profile is the mean of embeddings from clicked history items.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        data_dir: str = "data/raw",
+        train_split_dir: str = "MINDsmall_train",
+        test_split_dir: str = "MINDsmall_dev",
+    ):
+        self.data_dir = data_dir
+        self.split_dirs = {
+            "train": train_split_dir,
+            "test": test_split_dir,
+        }
         self.news_index: list[str] = []
         self.news_embeddings: np.ndarray | None = None
         self.news_norms: np.ndarray | None = None
@@ -27,13 +37,19 @@ class EntityContentRecommender(BaseRecommender):
     ) -> "EntityContentRecommender":
         del text_col
 
-        raw_entity_vectors = load_entity_embeddings()
+        raw_entity_vectors = load_entity_embeddings(
+            data_dir=self.data_dir,
+            split_dirs=self.split_dirs,
+        )
         if not raw_entity_vectors:
             raise ValueError("No entity embeddings were found.")
         entity_vectors = {
             key: np.asarray(vec, dtype=np.float32) for key, vec in raw_entity_vectors.items()
         }
-        news_entity_ids = load_news_entity_ids()
+        news_entity_ids = load_news_entity_ids(
+            data_dir=self.data_dir,
+            split_dirs=self.split_dirs,
+        )
 
         sample_vec = next(iter(entity_vectors.values()))
         dim = int(sample_vec.shape[0])

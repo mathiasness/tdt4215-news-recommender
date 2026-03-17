@@ -60,7 +60,11 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "class_path": "src.recommenders.content.entity:EntityContentRecommender",
         "fit_mode": "legacy_content",
         "cli_args": [],
-        "init_from_args": {},
+        "init_from_args": {
+            "data_dir": "data_dir",
+            "train_split_dir": "train_split_dir",
+            "test_split_dir": "test_split_dir",
+        },
     },
 }
 
@@ -69,6 +73,49 @@ def _load_class(class_path: str):
     module_path, class_name = class_path.split(":")
     module = importlib.import_module(module_path)
     return getattr(module, class_name)
+
+
+def _add_data_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--data-dir",
+        type=str,
+        default="data/raw",
+        help="Root directory containing raw MIND split folders.",
+    )
+    parser.add_argument(
+        "--processed-dir",
+        type=str,
+        default="data/processed",
+        help="Directory for processed CSV files.",
+    )
+    parser.add_argument(
+        "--train-split-dir",
+        type=str,
+        default="MINDsmall_train",
+        help="Folder name for the raw train split inside --data-dir.",
+    )
+    parser.add_argument(
+        "--test-split-dir",
+        type=str,
+        default="MINDsmall_dev",
+        help="Folder name for the raw test/dev split inside --data-dir.",
+    )
+
+
+def _add_history_filter_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--min-history",
+        type=int,
+        default=0,
+        help="Keep only impressions with history length >= this value.",
+    )
+
+
+def _split_dir_mapping(args: argparse.Namespace) -> dict[str, str]:
+    return {
+        "train": str(args.train_split_dir),
+        "test": str(args.test_split_dir),
+    }
 
 
 
@@ -358,14 +405,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="MIND news recommender runner")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("preprocess")
+    preprocess_parser = subparsers.add_parser("preprocess")
+    _add_data_args(preprocess_parser)
+    _add_history_filter_arg(preprocess_parser)
 
     train_parser = subparsers.add_parser("train")
     train_parser.add_argument("--model", choices=sorted(MODEL_REGISTRY.keys()), required=True)
+    _add_data_args(train_parser)
+    _add_history_filter_arg(train_parser)
 
     eval_parser = subparsers.add_parser("eval")
     eval_parser.add_argument("--model", choices=sorted(MODEL_REGISTRY.keys()), required=True)
     eval_parser.add_argument("--k", type=int, default=10)
+    _add_data_args(eval_parser)
+    _add_history_filter_arg(eval_parser)
 
     _add_model_args(train_parser)
     _add_model_args(eval_parser)
@@ -379,12 +432,29 @@ def main() -> None:
 
     if args.command == "preprocess":
         for split in ("train", "test"):
-            build_processed_split(split)
-        print("Built processed train/test splits.")
+            news_df, behaviors_df = build_processed_split(
+                split,
+                data_dir=args.data_dir,
+                processed_dir=args.processed_dir,
+                split_dirs=_split_dir_mapping(args),
+                min_history_len=args.min_history,
+            )
+            print(
+                f"Built split={split} with {len(news_df)} news rows and "
+                f"{len(behaviors_df)} behavior rows in {args.processed_dir}"
+            )
         return
 
-    news_train, beh_train = load_processed_split("train")
-    news_test, beh_test = load_processed_split("test")
+    news_train, beh_train = load_processed_split(
+        "train",
+        processed_dir=args.processed_dir,
+        min_history_len=args.min_history,
+    )
+    news_test, beh_test = load_processed_split(
+        "test",
+        processed_dir=args.processed_dir,
+        min_history_len=args.min_history,
+    )
 
     model = _build_model(args.model, args)
     _fit_model(args.model, model, beh_train, news_train, news_test)
