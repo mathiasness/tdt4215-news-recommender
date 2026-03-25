@@ -56,6 +56,33 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "init_from_args": {"max_features": "max_features"},
         "init_builder": lambda args: {"ngram_range": (1, args.ngram_max)},
     },
+    "hybrid_pop_itemknn_tfidf": {
+        "class_path": "src.recommenders.hybrid.hybrid:HybridNewsRecommender",
+        "fit_mode": "hybrid",
+        "cli_args": [
+            {"flags": ("--max-features",), "kwargs": {"type": int, "default": 50000}},
+            {"flags": ("--ngram-max",), "kwargs": {"type": int, "default": 2}},
+            {"flags": ("--k-neighbors",), "kwargs": {"type": int, "default": 50}},
+            {"flags": ("--top-k-popular",), "kwargs": {"type": int, "default": None}},
+            {"flags": ("--hybrid-weight-pop",), "kwargs": {"type": float, "default": 0.20}},
+            {"flags": ("--hybrid-weight-itemknn",), "kwargs": {"type": float, "default": 0.45}},
+            {"flags": ("--hybrid-weight-tfidf",), "kwargs": {"type": float, "default": 0.35}},
+            {
+                "flags": ("--hybrid-normalize",),
+                "kwargs": {"choices": ["none", "minmax", "zscore"], "default": "minmax"},
+            },
+        ],
+        "init_from_args": {
+            "k_neighbors": "k_neighbors",
+            "top_k_popular": "top_k_popular",
+            "max_features": "max_features",
+            "pop_weight": "hybrid_weight_pop",
+            "itemknn_weight": "hybrid_weight_itemknn",
+            "tfidf_weight": "hybrid_weight_tfidf",
+            "normalize": "hybrid_normalize",
+        },
+        "init_builder": lambda args: {"ngram_range": (1, args.ngram_max)},
+    },
     "content_entity": {
         "class_path": "src.recommenders.content.entity:EntityContentRecommender",
         "fit_mode": "legacy_content",
@@ -160,6 +187,12 @@ def _fit_model(
         model.fit(beh_train)
         return
     if fit_mode == "legacy_content":
+        all_news = pd.concat([news_train, news_test], ignore_index=True).drop_duplicates(
+            subset=["news_id"]
+        )
+        model.fit(all_news, beh_train, text_col="text")
+        return
+    if fit_mode == "hybrid":
         all_news = pd.concat([news_train, news_test], ignore_index=True).drop_duplicates(
             subset=["news_id"]
         )
@@ -394,7 +427,7 @@ def _score_candidates(
         )
         scores = _mask_seen_candidates(scores, candidates, history)
         return _sanitize_scores(scores, len(candidates))
-
+    
     scores = _call_score_maybe_with_history(model, user_id, candidates, history)
     scores = _sanitize_scores(scores, len(candidates))
     return _mask_seen_candidates(scores, candidates, history)
