@@ -20,6 +20,7 @@ from src.preprocess.mind_reader import build_processed_split, load_processed_spl
 
 
 MODEL_REGISTRY: dict[str, dict[str, Any]] = {
+    # baselines
     "popular": {
         "class_path": "src.recommenders.baseline.popular:PopularRecommender",
         "fit_mode": "behaviors",
@@ -34,6 +35,7 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         ],
         "init_from_args": {"seed": "seed"},
     },
+    # collaborative
     "itemknn": {
         "class_path": "src.recommenders.collaborative.item_knn:ItemKNNRecommender",
         "fit_mode": "behaviors",
@@ -46,6 +48,21 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             "top_k_popular": "top_k_popular",
         },
     },
+    "ease": {
+        "class_path": "src.recommenders.collaborative.ease:EASERecommender",
+        "fit_mode": "behaviors",
+        "cli_args": [
+            {"flags": ("--ease-l2",), "kwargs": {"type": float, "default": 500.0}},
+            {"flags": ("--ease-max-items",), "kwargs": {"type": int, "default": 15000}},
+            {"flags": ("--ease-min-item-support",), "kwargs": {"type": int, "default": 2}},
+        ],
+        "init_from_args": {
+            "l2": "ease_l2",
+            "max_items": "ease_max_items",
+            "min_item_support": "ease_min_item_support",
+        },
+    },
+    # Content
     "content_tfidf": {
         "class_path": "src.recommenders.content.tfidf:TfidfContentRecommender",
         "fit_mode": "legacy_content",
@@ -56,6 +73,84 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "init_from_args": {"max_features": "max_features"},
         "init_builder": lambda args: {"ngram_range": (1, args.ngram_max)},
     },
+    "content_entity": {
+        "class_path": "src.recommenders.content.entity:EntityContentRecommender",
+        "fit_mode": "legacy_content",
+        "cli_args": [],
+        "init_from_args": {
+            "data_dir": "data_dir",
+            "train_split_dir": "train_split_dir",
+            "test_split_dir": "test_split_dir",
+        },
+    },
+    # neural
+     "nrms": {
+        "class_path": "src.recommenders.neural.nrms:NRMSRecommender",
+        "fit_mode": "news_behaviors",
+        "cli_args": [
+            {"flags": ("--vocab-size",), "kwargs": {"type": int, "default": 30000}},
+            {"flags": ("--min-word-freq",), "kwargs": {"type": int, "default": 2}},
+            {"flags": ("--embed-dim",), "kwargs": {"type": int, "default": 128}},
+            {"flags": ("--num-heads",), "kwargs": {"type": int, "default": 8}},
+            {"flags": ("--history-size",), "kwargs": {"type": int, "default": 20}},
+            {"flags": ("--neg-ratio",), "kwargs": {"type": int, "default": 4}},
+            {"flags": ("--batch-size",), "kwargs": {"type": int, "default": 64}},
+            {"flags": ("--epochs",), "kwargs": {"type": int, "default": 3}},
+            {"flags": ("--lr",), "kwargs": {"type": float, "default": 1e-3}},
+            {"flags": ("--dropout",), "kwargs": {"type": float, "default": 0.2}},
+            {"flags": ("--max-title-len",), "kwargs": {"type": int, "default": 30}},
+            {"flags": ("--seed",), "kwargs": {"type": int, "default": 42}},
+        ],
+        "init_from_args": {
+            "vocab_size": "vocab_size",
+            "min_word_freq": "min_word_freq",
+            "embed_dim": "embed_dim",
+            "num_heads": "num_heads",
+            "history_size": "history_size",
+            "neg_ratio": "neg_ratio",
+            "batch_size": "batch_size",
+            "epochs": "epochs",
+            "lr": "lr",
+            "dropout": "dropout",
+            "max_title_len": "max_title_len",
+            "seed": "seed",
+        },
+    },
+    "naml": {
+        "class_path": "src.recommenders.neural.naml:NAMLRecommender",
+        "fit_mode": "news_behaviors",
+        "cli_args": [
+            {"flags": ("--vocab-size",), "kwargs": {"type": int, "default": 30000}},
+            {"flags": ("--min-word-freq",), "kwargs": {"type": int, "default": 2}},
+            {"flags": ("--embed-dim",), "kwargs": {"type": int, "default": 128}},
+            {"flags": ("--category-dim",), "kwargs": {"type": int, "default": 64}},
+            {"flags": ("--history-size",), "kwargs": {"type": int, "default": 20}},
+            {"flags": ("--neg-ratio",), "kwargs": {"type": int, "default": 4}},
+            {"flags": ("--batch-size",), "kwargs": {"type": int, "default": 64}},
+            {"flags": ("--epochs",), "kwargs": {"type": int, "default": 3}},
+            {"flags": ("--lr",), "kwargs": {"type": float, "default": 1e-3}},
+            {"flags": ("--dropout",), "kwargs": {"type": float, "default": 0.2}},
+            {"flags": ("--max-title-len",), "kwargs": {"type": int, "default": 24}},
+            {"flags": ("--max-abstract-len",), "kwargs": {"type": int, "default": 48}},
+            {"flags": ("--seed",), "kwargs": {"type": int, "default": 42}},
+        ],
+        "init_from_args": {
+            "vocab_size": "vocab_size",
+            "min_word_freq": "min_word_freq",
+            "embed_dim": "embed_dim",
+            "category_dim": "category_dim",
+            "history_size": "history_size",
+            "neg_ratio": "neg_ratio",
+            "batch_size": "batch_size",
+            "epochs": "epochs",
+            "lr": "lr",
+            "dropout": "dropout",
+            "max_title_len": "max_title_len",
+            "max_abstract_len": "max_abstract_len",
+            "seed": "seed",
+        },
+    },
+    # hybrid
     "hybrid_pop_itemknn_tfidf": {
         "class_path": "src.recommenders.hybrid.hybrid:HybridNewsRecommender",
         "fit_mode": "hybrid",
@@ -82,16 +177,6 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             "normalize": "hybrid_normalize",
         },
         "init_builder": lambda args: {"ngram_range": (1, args.ngram_max)},
-    },
-    "content_entity": {
-        "class_path": "src.recommenders.content.entity:EntityContentRecommender",
-        "fit_mode": "legacy_content",
-        "cli_args": [],
-        "init_from_args": {
-            "data_dir": "data_dir",
-            "train_split_dir": "train_split_dir",
-            "test_split_dir": "test_split_dir",
-        },
     },
 }
 
@@ -192,7 +277,7 @@ def _fit_model(
         )
         model.fit(all_news, beh_train, text_col="text")
         return
-    if fit_mode == "hybrid":
+    if fit_mode in {"hybrid", "news_behaviors"}:
         all_news = pd.concat([news_train, news_test], ignore_index=True).drop_duplicates(
             subset=["news_id"]
         )
