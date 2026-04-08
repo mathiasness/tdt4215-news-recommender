@@ -50,6 +50,7 @@ class TfidfContentRecommender(BaseRecommender):
         self.news_tfidf = None
         self.user_profiles: dict[str, np.ndarray] = {}
         self.news_id_to_idx: dict[str, int] = {}
+        self.popularity: pd.Series = pd.Series(dtype=np.float32)
 
     def _build_cache_key(self, news: pd.DataFrame, text_col: str) -> str:
         hasher = hashlib.sha256()
@@ -152,6 +153,10 @@ class TfidfContentRecommender(BaseRecommender):
             self.news_tfidf = self.vectorizer.fit_transform(news[text_col])
             if self.use_cache:
                 self._save_to_cache(cache_key)
+        
+        exploded = user_history_df[["candidates", "labels"]].explode(["candidates", "labels"])
+        clicked = exploded.loc[exploded["labels"].astype(int) == 1, "candidates"].astype(str)
+        self.popularity = clicked.value_counts().astype(np.float32)
 
         self.user_profiles = {}
         for row in user_history_df[["user_id", "history"]].itertuples(index=False):
@@ -170,7 +175,13 @@ class TfidfContentRecommender(BaseRecommender):
             user_profile = self.user_profiles.get(user_id)
 
         if user_profile is None:
-            raise ValueError(f"User {user_id} not found")
+            pop_scores = np.array(
+                [self.popularity.get(str(nid), 0.0) for nid in self.news_index],
+                dtype=np.float32,
+            )
+            return pd.DataFrame({"news_id": self.news_index, "score": pop_scores}).sort_values(
+                "score", ascending=False
+            )
 
         scores = cosine_similarity(user_profile, self.news_tfidf).ravel()
         return pd.DataFrame({"news_id": self.news_index, "score": scores}).sort_values(
