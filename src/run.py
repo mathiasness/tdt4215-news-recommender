@@ -20,6 +20,7 @@ from src.preprocess.mind_reader import build_processed_split, load_processed_spl
 
 
 MODEL_REGISTRY: dict[str, dict[str, Any]] = {
+    # baselines
     "popular": {
         "class_path": "src.recommenders.baseline.popular:PopularRecommender",
         "fit_mode": "behaviors",
@@ -34,6 +35,7 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         ],
         "init_from_args": {"seed": "seed"},
     },
+    # collaborative
     "itemknn": {
         "class_path": "src.recommenders.collaborative.item_knn:ItemKNNRecommender",
         "fit_mode": "behaviors",
@@ -46,6 +48,21 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             "top_k_popular": "top_k_popular",
         },
     },
+    "ease": {
+        "class_path": "src.recommenders.collaborative.ease:EASERecommender",
+        "fit_mode": "behaviors",
+        "cli_args": [
+            {"flags": ("--ease-l2",), "kwargs": {"type": float, "default": 500.0}},
+            {"flags": ("--ease-max-items",), "kwargs": {"type": int, "default": 15000}},
+            {"flags": ("--ease-min-item-support",), "kwargs": {"type": int, "default": 2}},
+        ],
+        "init_from_args": {
+            "l2": "ease_l2",
+            "max_items": "ease_max_items",
+            "min_item_support": "ease_min_item_support",
+        },
+    },
+    # feature based
     "content_tfidf": {
         "class_path": "src.recommenders.content.tfidf:TfidfContentRecommender",
         "fit_mode": "legacy_content",
@@ -54,33 +71,6 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             {"flags": ("--ngram-max",), "kwargs": {"type": int, "default": 2}},
         ],
         "init_from_args": {"max_features": "max_features"},
-        "init_builder": lambda args: {"ngram_range": (1, args.ngram_max)},
-    },
-    "hybrid_pop_itemknn_tfidf": {
-        "class_path": "src.recommenders.hybrid.hybrid:HybridNewsRecommender",
-        "fit_mode": "hybrid",
-        "cli_args": [
-            {"flags": ("--max-features",), "kwargs": {"type": int, "default": 50000}},
-            {"flags": ("--ngram-max",), "kwargs": {"type": int, "default": 2}},
-            {"flags": ("--k-neighbors",), "kwargs": {"type": int, "default": 50}},
-            {"flags": ("--top-k-popular",), "kwargs": {"type": int, "default": None}},
-            {"flags": ("--hybrid-weight-pop",), "kwargs": {"type": float, "default": 0.20}},
-            {"flags": ("--hybrid-weight-itemknn",), "kwargs": {"type": float, "default": 0.45}},
-            {"flags": ("--hybrid-weight-tfidf",), "kwargs": {"type": float, "default": 0.35}},
-            {
-                "flags": ("--hybrid-normalize",),
-                "kwargs": {"choices": ["none", "minmax", "zscore"], "default": "minmax"},
-            },
-        ],
-        "init_from_args": {
-            "k_neighbors": "k_neighbors",
-            "top_k_popular": "top_k_popular",
-            "max_features": "max_features",
-            "pop_weight": "hybrid_weight_pop",
-            "itemknn_weight": "hybrid_weight_itemknn",
-            "tfidf_weight": "hybrid_weight_tfidf",
-            "normalize": "hybrid_normalize",
-        },
         "init_builder": lambda args: {"ngram_range": (1, args.ngram_max)},
     },
     "content_entity": {
@@ -92,6 +82,29 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             "train_split_dir": "train_split_dir",
             "test_split_dir": "test_split_dir",
         },
+    },
+    # hybrid
+    "hybrid": {
+        "class_path": "src.recommenders.hybrid.hybrid:HybridNewsRecommender",
+        "fit_mode": "hybrid",
+        "cli_args": [
+            {"flags": ("--max-features",), "kwargs": {"type": int, "default": 50000}},
+            {"flags": ("--ngram-max",), "kwargs": {"type": int, "default": 2}},
+            {"flags": ("--hybrid-weight-ease",), "kwargs": {"type": float, "default": 0.5}},
+            {"flags": ("--hybrid-weight-tfidf",), "kwargs": {"type": float, "default": 0.5}},
+            {"flags": ("--ease-l2",), "kwargs": {"type": float, "default": 500.0}},
+            {"flags": ("--ease-max-items",), "kwargs": {"type": int, "default": 15000}},
+            {"flags": ("--ease-min-item-support",), "kwargs": {"type": int, "default": 2}},
+        ],
+        "init_from_args": {
+            "max_features": "max_features",
+            "ease_weight": "hybrid_weight_ease",
+            "tfidf_weight": "hybrid_weight_tfidf",
+            "l2": "ease_l2",
+            "max_items": "ease_max_items",
+            "min_item_support": "ease_min_item_support",
+        },
+        "init_builder": lambda args: {"ngram_range": (1, args.ngram_max)},
     },
 }
 

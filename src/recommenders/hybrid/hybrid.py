@@ -1,155 +1,42 @@
-from __future__ import annotations
+"""Hybrid recommender combining EASE and TF-IDF.
 
-from pathlib import Path
+Combines CF: EASE and feature-based: TF-IDF.
+Popularity baseline fallback is handled within EASE/TF-IDF.
+"""
+
+from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics.pairwise import cosine_similarity
 
 from src.recommenders.base import BaseRecommender
-from src.recommenders.collaborative.item_knn import ItemKNNRecommender
+from src.recommenders.collaborative.ease import EASERecommender
 from src.recommenders.content.tfidf import TfidfContentRecommender
+
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 class HybridNewsRecommender(BaseRecommender):
-    """Weighted hybrid of popularity, item-kNN, and TF-IDF."""
-
     def __init__(
         self,
-        pop_weight: float = 0.20,
-        itemknn_weight: float = 0.45,
-        tfidf_weight: float = 0.35,
-        normalize: str = "minmax",
-        k_neighbors: int = 50,
-        top_k_popular: int | None = None,
+        ease_weight: float = 0.5,
+        tfidf_weight: float = 0.5,
         max_features: int = 50000,
         ngram_range: tuple[int, int] = (1, 2),
-        use_cache: bool = True,
-        cache_dir: str | Path | None = None,
+        l2: float = 500.0,
+        max_items: int = 15000,
+        min_item_support: int = 2,
     ):
-        weights = np.array([pop_weight, itemknn_weight, tfidf_weight], dtype=np.float32)
-        if np.any(weights < 0):
-            raise ValueError("Hybrid weights must be non-negative.")
-        if weights.sum() <= 0:
-            raise ValueError("At least one hybrid weight must be positive.")
-        if normalize not in {"none", "minmax", "zscore"}:
-            raise ValueError("normalize must be one of: 'none', 'minmax', 'zscore'.")
+        weights = np.array([ease_weight, tfidf_weight], dtype=np.float32)
+        if np.any(weights < 0) or weights.sum() <= 0:
+            raise ValueError("Weights must be non-negative and sum to > 0.")
+        weights /= weights.sum()
+        self.ease_weight, self.tfidf_weight = float(weights[0]), float(weights[1])
 
-        self.pop_weight, self.itemknn_weight, self.tfidf_weight = (weights / weights.sum()).tolist()
-        self.normalize = normalize
+        self.ease = EASERecommender(l2=l2, max_items=max_items, min_item_support=min_item_support)
+        self.tfidf = TfidfContentRecommender(max_features=max_features, ngram_range=ngram_range)
 
-        self.itemknn = ItemKNNRecommender(
-            k_neighbors=int(k_neighbors),
-            top_k_popular=top_k_popular,
-        )
-        self.tfidf = TfidfContentRecommender(
-            max_features=int(max_features),
-            ngram_range=ngram_range,
-            use_cache=use_cache,
-            cache_dir=cache_dir,
-        )
-
-        self.popularity = pd.Series(dtype=np.float32)
-        self.user_history: dict[str, set[str]] = {}
         self.news_id_to_idx: dict[str, int] = {}
-
-    @staticmethod
-    def _build_popularity(behaviors_df: pd.DataFrame) -> pd.Series:
-        required = {"candidates", "labels"}
-        missing = required - set(behaviors_df.columns)
-        if missing:
-            raise ValueError(f"behaviors_df missing columns: {sorted(missing)}")
-
-        exploded = behaviors_df[["candidates", "labels"]].explode(["candidates", "labels"])
-        clicked = exploded.loc[exploded["labels"].astype(int) == 1, "candidates"].astype(str)
-        return clicked.value_counts().astype(np.float32) if not clicked.empty else pd.Series(dtype=np.float32)
-
-    ### Internal helpers ###
-    
-    @staticmethod
-    def _sanitize(scores: np.ndarray, n: int) -> np.ndarray:
-        scores = np.asarray(scores, dtype=np.float32).reshape(-1)
-        if len(scores) != n:
-            raise ValueError(f"Expected {n} scores, got shape {scores.shape}.")
-        return np.nan_to_num(scores, nan=0.0, posinf=0.0, neginf=0.0)
-
-    def _normalize(self, scores: np.ndarray) -> np.ndarray:
-        scores = self._sanitize(scores, len(scores))
-        if self.normalize == "none" or len(scores) == 0:
-            return scores
-
-        if self.normalize == "minmax":
-            lo, hi = float(scores.min()), float(scores.max())
-            return np.zeros_like(scores) if hi <= lo else ((scores - lo) / (hi - lo)).astype(np.float32)
-
-        mean, std = float(scores.mean()), float(scores.std())
-        return np.zeros_like(scores) if std <= 1e-12 else ((scores - mean) / std).astype(np.float32)
-
-    @staticmethod
-    def _clean_history(history: list[str] | None) -> list[str]:
-        return [str(x) for x in (history or []) if str(x).strip()]
-    
-    ### Scoring helpers ###
-
-    def _pop_scores(self, candidates: list[str]) -> np.ndarray:
-        return np.array([self.popularity.get(str(cid), 0.0) for cid in candidates], dtype=np.float32)
-
-    def _itemknn_scores(self, candidates: list[str], history: list[str]) -> np.ndarray:
-        seen = set(history)
-        if not seen:
-            return self._pop_scores(candidates)
-
-        popularity = self.itemknn.popularity if self.itemknn.popularity is not None else self.popularity
-        out = []
-
-        for cid in map(str, candidates):
-            if cid in seen:
-                out.append(-1.0)
-                continue
-
-            sim_row = self.itemknn.item_similarity.get(cid, {})
-            cf_score = sum(sim_row.get(h, 0.0) for h in seen)
-            pop_score = popularity.get(cid, 0.0) if popularity is not None else 0.0
-            out.append(float(cf_score + 1e-6 * pop_score))
-
-        return np.asarray(out, dtype=np.float32)
-
-    def _tfidf_scores(self, candidates: list[str], history: list[str]) -> np.ndarray:
-        if self.tfidf.news_tfidf is None or not history:
-            return self._pop_scores(candidates)
-
-        profile = self.tfidf._profile_from_history(history)
-        if profile is None:
-            return self._pop_scores(candidates)
-
-        scores = self._pop_scores(candidates)
-        pairs = [(i, self.news_id_to_idx[str(cid)]) for i, cid in enumerate(candidates) if str(cid) in self.news_id_to_idx]
-        if not pairs:
-            return scores
-
-        positions, idxs = zip(*pairs)
-        sims = cosine_similarity(profile, self.tfidf.news_tfidf[list(idxs)]).ravel()
-        for pos, sim in zip(positions, sims):
-            scores[pos] = float(sim)
-
-        return scores.astype(np.float32)
-
-    @staticmethod
-    def _mask_seen(scores: np.ndarray, candidates: list[str], history: list[str]) -> np.ndarray:
-        if not history or len(scores) == 0:
-            return scores
-
-        seen = set(map(str, history))
-        masked = scores.copy()
-        floor = float(masked.min()) - 1.0 if len(masked) else -1.0
-
-        for i, cid in enumerate(candidates):
-            if str(cid) in seen:
-                masked[i] = floor
-
-        return masked
-
-    ### Public API ###
 
     def fit(
         self,
@@ -157,13 +44,17 @@ class HybridNewsRecommender(BaseRecommender):
         behaviors_df: pd.DataFrame,
         text_col: str = "text",
     ) -> "HybridNewsRecommender":
-        self.itemknn.fit(behaviors_df)
+        self.ease.fit(behaviors_df)
         self.tfidf.fit(news_df, behaviors_df, text_col=text_col)
-
-        self.popularity = self._build_popularity(behaviors_df)
-        self.user_history = dict(self.itemknn.user_history)
         self.news_id_to_idx = {str(nid): i for i, nid in enumerate(self.tfidf.news_index)}
         return self
+
+    @staticmethod
+    def _minmax(scores: np.ndarray) -> np.ndarray:
+        lo, hi = scores.min(), scores.max()
+        if hi <= lo:
+            return np.zeros_like(scores)
+        return ((scores - lo) / (hi - lo)).astype(np.float32)
 
     def score(
         self,
@@ -171,26 +62,35 @@ class HybridNewsRecommender(BaseRecommender):
         candidates: list[str],
         history: list[str] | None = None,
     ) -> np.ndarray:
-        candidates = [str(x) for x in candidates]
+        candidates = [str(c) for c in candidates]
         if not candidates:
             return np.array([], dtype=np.float32)
 
-        history = self._clean_history(history) or sorted(self.user_history.get(str(user_id), set()))
+        ease_scores = self.ease.score(user_id, candidates, history=history)
 
-        pop_raw = self._pop_scores(candidates)
-        if not history:
-            return self._sanitize(pop_raw, len(candidates))
-
-        item_raw = self._itemknn_scores(candidates, history)
-        tfidf_raw = self._tfidf_scores(candidates, history)
+        # Score only the candidates, not the full news matrix
+        hist = history or list(self.ease.user_history.get(user_id, []))
+        profile = self.tfidf._profile_from_history(hist) if hist else None
+        if profile is None:
+            tfidf_scores = np.array(
+                [self.tfidf.popularity.get(c, 0.0) for c in candidates], dtype=np.float32
+            )
+        else:
+            cand_idxs = [self.tfidf.news_id_to_idx[c] for c in candidates if c in self.tfidf.news_id_to_idx]
+            cand_pos  = [i for i, c in enumerate(candidates) if c in self.tfidf.news_id_to_idx]
+            tfidf_scores = np.array(
+                [self.tfidf.popularity.get(c, 0.0) for c in candidates], dtype=np.float32
+            )
+            if cand_idxs:
+                sims = cosine_similarity(profile, self.tfidf.news_tfidf[cand_idxs]).ravel()
+                for pos, sim in zip(cand_pos, sims):
+                    tfidf_scores[pos] = float(sim)
 
         combined = (
-            self.pop_weight * self._normalize(pop_raw)
-            + self.itemknn_weight * self._normalize(item_raw)
-            + self.tfidf_weight * self._normalize(tfidf_raw)
-        ).astype(np.float32)
-
-        return self._sanitize(self._mask_seen(combined, candidates, history), len(candidates))
+            self.ease_weight  * self._minmax(ease_scores)
+            + self.tfidf_weight * self._minmax(tfidf_scores)
+        )
+        return np.nan_to_num(combined, nan=0.0, posinf=0.0, neginf=0.0)
 
     def recommend(
         self,
@@ -199,74 +99,5 @@ class HybridNewsRecommender(BaseRecommender):
         k: int = 10,
         history: list[str] | None = None,
     ) -> list[str]:
-        if k <= 0:
-            return []
-        scores = self.score(user_id=user_id, candidates=candidates, history=history)
+        scores = self.score(user_id, candidates, history=history)
         return [candidates[i] for i in np.argsort(scores)[::-1][:k]]
-
-"""
-python -m src.run train --model hybrid_pop_itemknn_tfidf
-
-python -m src.run eval \
-  --model hybrid_pop_itemknn_tfidf \
-  --k 10 \
-  --hybrid-weight-pop 0.20 \
-  --hybrid-weight-itemknn 0.45 \
-  --hybrid-weight-tfidf 0.35 \
-  --hybrid-normalize minmax
-
----
-
-python -m src.run eval --model popular --k 10
-res:
-num_impressions=73152
-nDCG@10=0.3088
-MRR@10=0.2478
-Recall@10=0.5481
-
-python -m src.run eval --model itemknn --k 10
-res:
-num_impressions=73152
-nDCG@10=0.2675
-MRR@10=0.2021
-Recall@10=0.5072
-
-python -m src.run eval --model content_tfidf --k 10
-res:
-num_impressions=73152
-nDCG@10=0.3765
-MRR@10=0.3205
-Recall@10=0.6204
-
----
-
-python -m src.run eval --model hybrid_pop_itemknn_tfidf --k 10 --hybrid-weight-pop 0.10 --hybrid-weight-itemknn 0.60 --hybrid-weight-tfidf 0.30
-res:
-num_impressions=73152
-nDCG@10=0.3373
-MRR@10=0.2649
-Recall@10=0.6048
-
-python -m src.run eval --model hybrid_pop_itemknn_tfidf --k 10 --hybrid-weight-pop 0.20 --hybrid-weight-itemknn 0.45 --hybrid-weight-tfidf 0.35
-res:
-model=hybrid_pop_itemknn_tfidf
-num_impressions=73152
-nDCG@10=0.3383
-MRR@10=0.2670
-Recall@10=0.6036
-
-python -m src.run eval --model hybrid_pop_itemknn_tfidf --k 10 --hybrid-weight-pop 0.10 --hybrid-weight-itemknn 0.35 --hybrid-weight-tfidf 0.55
-res:
-num_impressions=73152
-nDCG@10=0.3597
-MRR@10=0.2998
-Recall@10=0.6102
-
-python -m src.run eval --model hybrid_pop_itemknn_tfidf --k 10 --hybrid-weight-pop 0.25 --hybrid-weight-itemknn 0.15 --hybrid-weight-tfidf 0.60
-res:
-num_impressions=73152
-nDCG@10=0.3677
-MRR@10=0.3111
-Recall@10=0.6118
-
-"""
