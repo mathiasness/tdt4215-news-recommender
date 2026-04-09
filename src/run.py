@@ -83,6 +83,19 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             "test_split_dir": "test_split_dir",
         },
     },
+    "content_category": {
+        "class_path": "src.recommenders.content.category:CategoryRecommender",
+        "fit_mode": "hybrid",
+        "cli_args": [
+            {
+                "flags": ("--category-subcat-weight",),
+                "kwargs": {"type": float, "default": 0.5},
+            },
+        ],
+        "init_from_args": {
+            "subcategory_weight": "category_subcat_weight",
+        },
+    },
     # hybrid
     "hybrid": {
         "class_path": "src.recommenders.hybrid.hybrid:HybridNewsRecommender",
