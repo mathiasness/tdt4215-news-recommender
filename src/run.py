@@ -73,16 +73,6 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "init_from_args": {"max_features": "max_features"},
         "init_builder": lambda args: {"ngram_range": (1, args.ngram_max)},
     },
-    "content_entity": {
-        "class_path": "src.recommenders.content.entity:EntityContentRecommender",
-        "fit_mode": "legacy_content",
-        "cli_args": [],
-        "init_from_args": {
-            "data_dir": "data_dir",
-            "train_split_dir": "train_split_dir",
-            "test_split_dir": "test_split_dir",
-        },
-    },
     "content_category": {
         "class_path": "src.recommenders.content.category:CategoryRecommender",
         "fit_mode": "hybrid",
@@ -356,51 +346,6 @@ def _score_tfidf_with_history(
     return _sanitize_scores(scores, len(candidates))
 
 
-
-def _score_entity_with_history(
-    model,
-    candidates: list[str],
-    history: list[str] | None,
-    popularity_prior: pd.Series | None,
-) -> np.ndarray:
-    if not history or model.news_embeddings is None or model.news_norms is None:
-        return _popularity_scores(candidates, popularity_prior, history)
-
-    news_id_to_idx = _get_news_id_to_idx(model)
-    hist_idxs = []
-    for nid in map(str, history):
-        idx = news_id_to_idx.get(nid)
-        if idx is None:
-            continue
-        if float(model.news_norms[idx]) <= 0.0:
-            continue
-        hist_idxs.append(idx)
-    if not hist_idxs:
-        return _popularity_scores(candidates, popularity_prior, history)
-
-    user_vec = np.mean(model.news_embeddings[hist_idxs], axis=0).astype(np.float32)
-    user_norm = float(np.linalg.norm(user_vec))
-    if user_norm <= 0.0:
-        return _popularity_scores(candidates, popularity_prior, history)
-
-    scores = np.array(
-        [float(popularity_prior.get(str(nid), 0.0)) if popularity_prior is not None else 0.0 for nid in candidates],
-        dtype=np.float32,
-    )
-    for pos, nid in enumerate(candidates):
-        idx = news_id_to_idx.get(str(nid))
-        if idx is None:
-            continue
-        denom = float(model.news_norms[idx]) * user_norm
-        if denom <= 0.0:
-            continue
-        scores[pos] = float(np.dot(model.news_embeddings[idx], user_vec) / denom)
-
-    scores = _mask_seen_candidates(scores, candidates, history)
-    return _sanitize_scores(scores, len(candidates))
-
-
-
 def _call_score_maybe_with_history(model, user_id: str, candidates: list[str], history: list[str] | None):
     score_fn = model.score
     try:
@@ -438,8 +383,6 @@ def _score_candidates(
         return _score_itemknn_with_history(model, candidates, history, popularity_prior)
     if model_name == "content_tfidf":
         return _score_tfidf_with_history(model, candidates, history, popularity_prior)
-    if model_name == "content_entity":
-        return _score_entity_with_history(model, candidates, history, popularity_prior)
 
     if fit_mode == "legacy_content":
         try:
