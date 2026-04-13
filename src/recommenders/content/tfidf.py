@@ -1,5 +1,3 @@
-"""TF-IDF content recommender."""
-
 import hashlib
 import json
 import pickle
@@ -15,13 +13,9 @@ from src.recommenders.base import BaseRecommender
 
 
 class TfidfContentRecommender(BaseRecommender):
-    """Build user profiles from averaged TF-IDF vectors of clicked news.
-
-    Minimal fixes applied:
-    - include category/subcategory in the text representation when available
-    - avoid np.matrix profiles from sparse `.mean(axis=0)`
-    - allow temporary history-aware scoring via `score(..., history=...)`
-    - use light recency weighting for history-derived profiles
+    """
+    Build user profiles from averaged TF-IDF vectors of clicked news.
+    Score candidate news by cosine similarity to the user profile.
     """
 
     CACHE_SCHEMA_VERSION = "tfidf-v2"

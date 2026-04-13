@@ -1,14 +1,3 @@
-"""EASE recommender for implicit-feedback news recommendation.
-
-EASE (Embarrassingly Shallow Autoencoders) learns a dense item-item weight
-matrix B by solving a closed-form regularised least squares problem on the
-user-item interaction matrix. At inference, a user's score for a candidate
-is the sum of B[hist_item, candidate] over their click history.
-
-The item universe is pruned before fitting because EASE scales quadratically
-in the number of items.
-"""
-
 from __future__ import annotations
 
 import numpy as np
@@ -19,6 +8,11 @@ from src.recommenders.base import BaseRecommender
 
 
 class EASERecommender(BaseRecommender):
+    """
+    EASE (Embarrassingly Shallow Autoencoders) recommender.
+    Learns a dense item-item weight matrix B by solving a closed-form regularised least squares problem on the user-item 
+    interaction matrix. At inference, a user's score for a candidate is the sum of B[hist_item, candidate] over their click history.
+    """
     def __init__(
         self,
         l2: float = 500.0,

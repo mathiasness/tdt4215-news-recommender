@@ -1,3 +1,5 @@
+"""Beyond accuracy metrics"""
+
 from __future__ import annotations
 
 import math

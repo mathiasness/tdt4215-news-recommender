@@ -1,18 +1,3 @@
-"""Category-profile content recommender.
-
-Represents user interest as a normalised distribution over news categories
-and subcategories derived from click history. Candidates are scored by how
-well their category/subcategory matches the user's interest profile,
-weighted by an IDF correction that downweights ubiquitous categories
-(e.g. "news", "sports") and rewards matches on rarer ones.
-
-Conceptually orthogonal to TF-IDF: uses article metadata rather than text,
-making it robust to vocabulary mismatch but limited by the coarseness of the
-category taxonomy.
-
-Falls back to global popularity when no usable history is available.
-"""
-
 from __future__ import annotations
 
 import math
@@ -25,6 +10,11 @@ from src.recommenders.base import BaseRecommender
 
 
 class CategoryRecommender(BaseRecommender):
+    """
+    Recommend news with categories matching the user's click history.
+    Uses IDF-weighting to prioritise matches on rare categories and subcategories.
+    """
+    
     def __init__(
         self,
         subcategory_weight: float = 0.5,
@@ -50,9 +40,7 @@ class CategoryRecommender(BaseRecommender):
             self.news_category[nid] = str(getattr(row, "category", "") or "")
             self.news_subcategory[nid] = str(getattr(row, "subcategory", "") or "")
 
-        # IDF over the news corpus: log(N / df) where df = number of articles
-        # in that category. Penalises dominant categories like "news"/"sports"
-        # and rewards matches on rare ones.
+        # IDF over the news corpus, reward rare categories
         N = len(news_df)
         cat_counts: Counter = Counter(self.news_category.values())
         sub_counts: Counter = Counter(self.news_subcategory.values())
