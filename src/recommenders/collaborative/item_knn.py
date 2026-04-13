@@ -1,5 +1,3 @@
-"""Item-based collaborative filtering recommender."""
-
 from collections import Counter, defaultdict
 from itertools import combinations
 
@@ -11,7 +9,7 @@ from src.recommenders.base import BaseRecommender
 
 class ItemKNNRecommender(BaseRecommender):
     """
-    Item-based kNN recommender for implicit feedback.
+    Item-based kNN recommender.
     Builds item-item similarity from user click histories and scores candidates by
     summing similarities to a user's clicked items.
     """
